@@ -1,5 +1,5 @@
-# git101
-Introductory Course on Git
+# Portfolio
+Coding Portfolio by Marcella Constantino
 
-I am editing the README file.
-Adding some more details about the project description.
+File Names:
+## terminal_snake.py

@@ -1,0 +1,271 @@
+# FILE NAME - terminal_snake.py
+
+# NAME: Marcella Constantino
+# DATE: 5/12/25
+# BRIEF DESCRIPTION: Snake Game (like slither.io)
+
+
+import curses
+import random
+import os
+import time
+
+# File to save scores
+SCORES_FILE = "snake_scores.txt"
+
+# Load scores from file
+def load_scores():
+    if not os.path.exists(SCORES_FILE):
+        return []
+    with open(SCORES_FILE, "r") as f:
+        return [int(line.strip()) for line in f if line.strip().isdigit()]
+
+# Save a new score to the file
+def save_score(score):
+    with open(SCORES_FILE, "a") as f:
+        f.write(f"{score}\n")
+
+# Clear all saved scores (when user quits the game)
+def clear_scores():
+    if os.path.exists(SCORES_FILE):
+        os.remove(SCORES_FILE)
+
+# Draw game border using "#" symbol
+def draw_border(stdscr, box):
+    for y in range(box[0][0], box[1][0] + 1):
+        stdscr.addstr(y, box[0][1], '#')
+        stdscr.addstr(y, box[1][1], '#')
+    for x in range(box[0][1], box[1][1] + 1):
+        stdscr.addstr(box[0][0], x, '#')
+        stdscr.addstr(box[1][0], x, '#')
+
+
+## Instructions menu ##########################################################################
+def show_instructions(stdscr):
+    resize_prompt_shown = False
+
+    while True:
+        h, w = stdscr.getmaxyx()
+
+        # Ensure terminal size is large enough
+        if h < 20 or w < 50:
+            if not resize_prompt_shown:
+                stdscr.clear()
+                try:
+                    stdscr.addstr(0, 0, "Terminal too small.")
+                    stdscr.addstr(1, 0, "Resize to at least 50×20 to play.")
+                    stdscr.refresh()
+                except curses.error:
+                    pass  # too small to even draw
+                resize_prompt_shown = True
+            time.sleep(0.1)  # avoid tight loop
+            continue
+        else:
+            if resize_prompt_shown:
+                stdscr.clear()
+            break  # screen is big enough, proceed
+
+    # Instructions menu
+    stdscr.clear()
+    instructions = [
+        "--------------------------------------",
+        "      Welcome to Terminal Snake!      ",
+        "--------------------------------------",
+        "",
+        "CONTROLS:",
+        "  Arrow keys = Move the snake",
+        "  * = Food to grow a longer snake",
+        "  r = Play again",
+        "  q = Quit the game at any time",
+        "",
+        "GOAL: Don't hit the walls or yourself!",
+        "",
+        "Press ENTER to start."
+    ]
+
+    # Center the instructions
+    for i, line in enumerate(instructions):
+        stdscr.addstr(h//2 - len(instructions)//2 + i, w//2 - len(line)//2, line)
+    stdscr.refresh()
+
+    stdscr.nodelay(False)
+    stdscr.timeout(-1)
+
+    # Wait for user input to start game
+    while True:
+        key = stdscr.getch()
+        if key in [10, 13]:  # ENTER
+            return True
+        elif key == ord('q'):
+            return False
+        elif key == ord('v'):
+            show_all_scores(stdscr)
+            continue
+
+
+## High score menu ##########################################################################
+def show_all_scores(stdscr):
+    stdscr.clear()
+    scores = load_scores()
+    if scores:
+        lines = ["All Past Scores:"] + [str(s) for s in scores]
+    else:
+        lines = ["No scores yet."]
+    h, w = stdscr.getmaxyx()
+    for i, line in enumerate(lines):
+        stdscr.addstr(h//2 - len(lines)//2 + i, w//2 - len(line)//2, line)
+    stdscr.addstr(h-2, 2, "Press any key to return to menu.")
+    stdscr.refresh()
+    stdscr.getch()
+
+
+## Game over menu ##########################################################################
+def show_game_over(stdscr, score):
+    save_score(score)
+    scores = load_scores()
+    high_score = max(scores) if scores else score
+    stdscr.clear()
+    options = [
+        f"Game Over! Your Score: {score}",
+        f"High Score: {high_score}",
+        "",
+        "Press 'r' to play again",
+        "Press 'v' to view all scores",
+        "Press 'q' to quit"
+    ]
+    h, w = stdscr.getmaxyx()
+    for i, line in enumerate(options):
+        stdscr.addstr(h//2 - len(options)//2 + i, w//2 - len(line)//2, line)
+    stdscr.refresh()
+
+    stdscr.nodelay(False)
+    stdscr.timeout(-1)
+
+    while True:
+        key = stdscr.getch()
+        if key == ord('r'):
+            return True
+        elif key == ord('v'):
+            show_all_scores(stdscr)
+            return show_game_over(stdscr, score)
+        elif key == ord('q'):
+            return False
+
+
+## Core game functionality ####################################################################
+def play_game(stdscr):
+    sh, sw = stdscr.getmaxyx()
+    box = [[3, 3], [sh-3, sw-3]]
+    stdscr.clear()
+    draw_border(stdscr, box)
+
+    # Initialize snake in center
+    snake = [[sh//2, sw//2 + i] for i in range(3)]
+    direction = curses.KEY_LEFT
+    score = 0
+
+    # Create 3 food items at random positions
+    food = []
+    while len(food) < 3:
+        new_food = [random.randint(box[0][0]+1, box[1][0]-1),
+                    random.randint(box[0][1]+1, box[1][1]-1)]
+        if new_food not in food and new_food not in snake:
+            food.append(new_food)
+            stdscr.addstr(new_food[0], new_food[1], '*')
+
+    # Draw initial snake
+    for y, x in snake:
+        stdscr.addstr(y, x, '█')
+
+    # Timing for consistent snake cursor speed
+    last_time = time.time()
+    delay = 0.1  # 100ms per frame
+
+    stdscr.nodelay(True)
+    stdscr.timeout(0)
+
+    grow_segments = 0
+
+    while True:
+        stdscr.addstr(1, 3, f"Score: {score}")
+        stdscr.refresh()
+
+        # Wait for next frame
+        now = time.time()
+        if now - last_time < delay:
+            time.sleep(delay - (now - last_time))
+        last_time = time.time()
+
+        key = stdscr.getch()
+        if key == ord('q'):
+            return False
+
+        # Prevent snake from reversing direction
+        opposites = {
+            curses.KEY_UP: curses.KEY_DOWN,
+            curses.KEY_DOWN: curses.KEY_UP,
+            curses.KEY_LEFT: curses.KEY_RIGHT,
+            curses.KEY_RIGHT: curses.KEY_LEFT
+        }
+        if key in opposites and direction != opposites[key]:
+            direction = key
+
+        # Move snake
+        head = snake[0]
+        if direction == curses.KEY_DOWN:
+            new_head = [head[0] + 1, head[1]]
+        elif direction == curses.KEY_UP:
+            new_head = [head[0] - 1, head[1]]
+        elif direction == curses.KEY_LEFT:
+            new_head = [head[0], head[1] - 1]
+        elif direction == curses.KEY_RIGHT:
+            new_head = [head[0], head[1] + 1]
+        else:
+            continue
+
+        # Collision detection
+        if (new_head in snake or
+            new_head[0] in [box[0][0], box[1][0]] or
+            new_head[1] in [box[0][1], box[1][1]]):
+            return show_game_over(stdscr, score)
+
+        snake.insert(0, new_head)
+
+        if new_head in food:
+            score += 1
+            food.remove(new_head)
+            grow_segments += 2
+            while len(food) < 3:
+                new_item = [random.randint(box[0][0]+1, box[1][0]-1),
+                            random.randint(box[0][1]+1, box[1][1]-1)]
+                if new_item not in food and new_item not in snake:
+                    food.append(new_item)
+                    stdscr.addstr(new_item[0], new_item[1], '*')
+        else:
+            if grow_segments > 0:
+                grow_segments -= 1
+            else:
+                tail = snake.pop()
+                stdscr.addstr(tail[0], tail[1], ' ')
+
+        stdscr.addstr(new_head[0], new_head[1], '█')
+
+
+## Main program loop ##########################################################################
+def main(stdscr):
+    # Set backgroud color
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    stdscr.bkgd(' ', curses.color_pair(1))
+
+    curses.curs_set(0)         # Hide cursor
+    while True:
+        if not show_instructions(stdscr):
+            break  # Should exit cleanly if terminal is too small or 'q'
+        if not play_game(stdscr):
+            break
+
+
+# Launch the game
+curses.wrapper(main)
